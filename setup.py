@@ -1,7 +1,7 @@
 """
-AI Code Reviewer - Setup and Launch Script
-Handles environment setup, dependency installation, Ollama verification, 
-and automatic server startup.
+AI Code Reviewer - Enhanced Setup and Launch Script
+Handles environment setup, hardware detection, automatic model selection,
+dependency installation, Ollama verification, and automatic server startup.
 """
 import os
 import sys
@@ -13,9 +13,13 @@ import subprocess
 import webbrowser
 from pathlib import Path
 
+# Try to import hardware detection libraries
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
 # --- Configuration ---
-REQUIRED_MODEL = "qwen2.5-coder:7b"
-DEFAULT_PORT = 8000
 REQUIRED_PROMPTS = [
     "stage1_understanding.txt",
     "stage2_bugs.txt",
@@ -23,7 +27,17 @@ REQUIRED_PROMPTS = [
     "stage4_performance.txt",
     "stage5_architecture.txt"
 ]
-REQUIRED_DIRS = ["uploads", "prompts", "templates", "static"]
+REQUIRED_DIRS = ["uploads", "prompts", "templates", "static", "history"]
+
+# Model definitions: (name, min_ram_gb, min_vram_gb, description)
+MODEL_TIERS = [
+    ("orca-mini:3b", 2, 0, "Ultra-light (2GB RAM) - Fast but basic analysis"),
+    ("mistral:7b", 4, 0, "Light (4GB RAM) - Good balance of speed and quality"),
+    ("neural-chat:7b", 4, 0, "Light (4GB RAM) - Code-optimized, good balance"),
+    ("qwen2.5-coder:7b", 6, 0, "Medium (6GB RAM) - Specialized for code review"),
+    ("llama2:13b", 8, 6, "Heavy (8GB RAM or 6GB VRAM) - Better accuracy"),
+    ("mistral:large", 16, 12, "Very Heavy (16GB RAM or 12GB VRAM) - Best accuracy"),
+]
 
 # Determine paths based on OS
 IS_WINDOWS = sys.platform.startswith("win")
@@ -39,9 +53,13 @@ server_process = None
 # ==========================================
 
 def print_header(text):
-    print(f"\n{'='*60}")
+    print(f"\n{'='*70}")
     print(f"  {text}")
-    print(f"{'='*60}\n")
+    print(f"{'='*70}\n")
+
+def print_section(text):
+    print(f"\n{text}")
+    print("-" * len(text))
 
 def run_cmd(cmd, capture=False, shell=False):
     """Run a shell command and return the result."""
@@ -54,7 +72,7 @@ def run_cmd(cmd, capture=False, shell=False):
     except Exception as e:
         return False, str(e)
 
-def find_free_port(start_port=DEFAULT_PORT):
+def find_free_port(start_port=8000):
     """Find a free port starting from start_port."""
     port = start_port
     while True:
@@ -88,6 +106,71 @@ def signal_handler(sig, frame):
     sys.exit(0)
 
 # ==========================================
+# HARDWARE DETECTION
+# ==========================================
+
+def get_system_resources():
+    """
+    Detect system resources: CPU count, RAM, VRAM.
+    Returns: (cpu_count, ram_gb, vram_gb, has_gpu)
+    """
+    cpu_count = os.cpu_count() or 1
+    
+    if psutil is None:
+        print("⚠️  psutil not found. Cannot detect RAM. Assuming 4GB.")
+        return cpu_count, 4, 0, False
+    
+    try:
+        # Get RAM
+        ram_bytes = psutil.virtual_memory().total
+        ram_gb = ram_bytes / (1024**3)
+        
+        # Try to detect GPU (simplified - just check if cuda/mps available)
+        # For more accuracy, would need nvidia-ml-py or similar
+        try:
+            import torch
+            vram_gb = 0
+            has_gpu = torch.cuda.is_available()
+            if has_gpu and torch.cuda.is_available():
+                vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        except ImportError:
+            has_gpu = False
+            vram_gb = 0
+        
+        return cpu_count, ram_gb, vram_gb, has_gpu
+    except Exception as e:
+        print(f"⚠️  Error detecting system resources: {e}. Assuming 4GB RAM.")
+        return cpu_count, 4, 0, False
+
+def select_best_model(ram_gb, vram_gb):
+    """
+    Select the best model based on available resources.
+    Returns: (model_name, reason)
+    """
+    available_vram = vram_gb if vram_gb > 0 else 0
+    available_ram = ram_gb
+    
+    # Prefer VRAM over RAM for Ollama
+    available_memory = max(available_vram, available_ram)
+    
+    selected_model = None
+    reason = ""
+    
+    # Find the best model that fits
+    for model_name, min_ram, min_vram, description in reversed(MODEL_TIERS):
+        if available_vram >= min_vram or (min_vram == 0 and available_ram >= min_ram):
+            selected_model = model_name
+            reason = description
+            break
+    
+    # Fallback to smallest model if nothing matches
+    if selected_model is None:
+        selected_model, _, _, reason = MODEL_TIERS[0]
+        reason = f"{reason} (minimum fallback)"
+    
+    return selected_model, reason
+
+# ==========================================
 # SETUP STEPS
 # ==========================================
 
@@ -118,8 +201,11 @@ def install_dependencies():
     # Upgrade pip first
     run_cmd(PIP_CMD + ["install", "--upgrade", "pip"], capture=True)
     
+    # Try to install psutil for hardware detection
+    print("️  Installing packages (including hardware detection tools)...")
+    run_cmd(PIP_CMD + ["install", "psutil"], capture=True)
+    
     # Install requirements
-    print("️  Installing packages...")
     success, msg = run_cmd(PIP_CMD + ["install", "-r", "requirements.txt"])
     if not success:
         print(f"❌ Failed to install dependencies: {msg}")
@@ -127,44 +213,135 @@ def install_dependencies():
     print("✅ Dependencies installed.")
 
 def check_ollama():
-    print(" Checking Ollama...")
+    print("🔍 Checking Ollama...")
     if not shutil.which("ollama"):
         print("❌ Ollama is not installed or not in PATH.")
         print("👉 Download from: https://ollama.com")
+        print("   After installation, please run this script again.")
         sys.exit(1)
     
     # Check if server is running
-    success, _ = run_cmd(["curl", "-s", "http://localhost:11434"], capture=True)
-    if not success:
-        print("⚙️  Ollama server is not running. Starting it...")
-        # Start ollama serve in background
-        subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(3) # Wait for it to start
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        result = sock.connect_ex(('127.0.0.1', 11434))
+        sock.close()
         
-    print("✅ Ollama is running.")
+        if result == 0:
+            print("✅ Ollama server is already running.")
+        else:
+            print("⚙️  Ollama server is not running. Starting it...")
+            subprocess.Popen(
+                ["ollama", "serve"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid if not IS_WINDOWS else None
+            )
+            print("   Waiting for Ollama to start...")
+            time.sleep(3)
+            
+            # Verify it started
+            result = sock.connect_ex(('127.0.0.1', 11434))
+            if result == 0:
+                print("✅ Ollama server started successfully.")
+            else:
+                print("⚠️  Ollama may still be starting. Proceeding anyway...")
+    except Exception as e:
+        print(f"⚠️  Error checking Ollama: {e}. Proceeding anyway...")
 
-def check_model():
-    print(f"🧠 Checking model: {REQUIRED_MODEL}...")
-    success, output = run_cmd(["ollama", "list"], capture=True)
-    if not success or REQUIRED_MODEL not in output:
-        print(f"️  Model not found. Pulling {REQUIRED_MODEL}...")
-        print("   (This may take a while depending on your internet speed)")
-        success, _ = run_cmd(["ollama", "pull", REQUIRED_MODEL])
-        if not success:
-            print(f"❌ Failed to pull model.")
-            sys.exit(1)
+def detect_and_select_model():
+    """
+    Detect system resources and select the best model.
+    Pull the model if not already installed.
+    Update config with the selected model.
+    """
+    print_section("🧠 Detecting System Resources")
     
-    # Test generation
-    print("⚙️  Running quick test generation...")
-    test_payload = f'{{"model": "{REQUIRED_MODEL}", "prompt": "Say OK", "stream": false}}'
-    success, _ = run_cmd(
-        ["curl", "-s", "http://localhost:11434/api/generate", "-d", test_payload], 
+    cpu_count, ram_gb, vram_gb, has_gpu = get_system_resources()
+    
+    print(f"  CPU Cores      : {cpu_count}")
+    print(f"  RAM            : {ram_gb:.1f} GB")
+    print(f"  GPU Available  : {'Yes' if has_gpu else 'No'}")
+    if has_gpu:
+        print(f"  VRAM           : {vram_gb:.1f} GB")
+    
+    print_section("📋 Available Models")
+    
+    for model_name, min_ram, min_vram, description in MODEL_TIERS:
+        fits = False
+        reason = ""
+        
+        if min_vram > 0 and vram_gb >= min_vram:
+            fits = True
+            reason = "(fits VRAM)"
+        elif min_vram == 0 and ram_gb >= min_ram:
+            fits = True
+            reason = "(fits RAM)"
+        
+        status = "✅" if fits else "❌"
+        print(f"  {status} {model_name:25} - {description} {reason}")
+    
+    # Select best model
+    selected_model, reason = select_best_model(ram_gb, vram_gb)
+    
+    print_section("🎯 Model Selection")
+    print(f"  Recommended Model: {selected_model}")
+    print(f"  Reason           : {reason}")
+    
+    # Check if model is installed
+    print_section("📥 Checking Model Installation")
+    print(f"  Checking if {selected_model} is installed...")
+    
+    success, output = run_cmd(["ollama", "list"], capture=True)
+    
+    if success and selected_model in output:
+        print(f"✅ Model {selected_model} is already installed.")
+    else:
+        print(f"⚙️  Model {selected_model} not found. Downloading...")
+        print("   (This may take several minutes depending on your internet speed)")
+        
+        success, msg = run_cmd(["ollama", "pull", selected_model])
+        if success:
+            print(f"✅ Model {selected_model} downloaded successfully.")
+        else:
+            print(f"⚠️  Failed to pull model automatically.")
+            print(f"   Error: {msg}")
+            print(f"   Please run manually: ollama pull {selected_model}")
+            # Continue anyway - user might pull it later
+    
+    # Test model generation
+    print_section("🧪 Testing Model")
+    print(f"  Running quick test with {selected_model}...")
+    
+    test_prompt = "Say 'OK'"
+    test_payload = f'{{"model": "{selected_model}", "prompt": "{test_prompt}", "stream": false}}'
+    success, msg = run_cmd(
+        ["curl", "-s", "http://localhost:11434/api/generate", "-d", test_payload],
         capture=True
     )
-    if success:
-        print(f"✅ Model {REQUIRED_MODEL} is ready and working.")
+    
+    if success and "error" not in msg.lower():
+        print(f"✅ Model {selected_model} is working correctly.")
     else:
-        print("⚠️  Model exists but test generation failed. Proceeding anyway...")
+        print(f"⚠️  Model test failed. The model may not be fully ready.")
+        print(f"   It will be retried during first use.")
+    
+    # Update config file with selected model
+    print_section("⚙️  Updating Configuration")
+    config_file = Path("config/settings.py")
+    
+    if config_file.exists():
+        config_content = config_file.read_text()
+        # Replace the DEFAULT_MODEL line
+        import re
+        new_content = re.sub(
+            r'DEFAULT_MODEL: str = "[^"]*"',
+            f'DEFAULT_MODEL: str = "{selected_model}"',
+            config_content
+        )
+        config_file.write_text(new_content)
+        print(f"✅ Updated DEFAULT_MODEL to: {selected_model}")
+    
+    return selected_model
 
 def verify_structure():
     print("📁 Verifying project structure...")
@@ -185,16 +362,18 @@ def verify_structure():
         
     print("✅ Project structure verified.")
 
-def print_diagnostic_report(port):
+def print_diagnostic_report(port, selected_model):
     print_header("STARTUP DIAGNOSTIC REPORT")
     print(f"  Python Version      : {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
     print(f"  Virtual Environment : {VENV_DIR.resolve()}")
-    print(f"  Dependencies        : Installed")
+    print(f"  Dependencies        : Installed (including psutil)")
     print(f"  Ollama Status       : Running")
-    print(f"  AI Model            : {REQUIRED_MODEL}")
+    print(f"  AI Model            : {selected_model}")
     print(f"  Prompt Files        : {len(REQUIRED_PROMPTS)} verified")
+    print(f"  Project Dirs        : {len(REQUIRED_DIRS)} verified")
     print(f"  Templates           : {Path('templates').resolve()}")
     print(f"  Uploads Directory   : {Path('uploads').resolve()}")
+    print(f"  History Directory   : {Path('history').resolve()}")
     print(f"  Server Port         : {port}")
     print(f"  Server Status       : Starting...")
     print()
@@ -207,49 +386,50 @@ def main():
     # Register cleanup handler
     signal.signal(signal.SIGINT, signal_handler)
     
-    print_header("AI CODE REVIEWER - SETUP")
+    print_header("AI CODE REVIEWER - ENHANCED SETUP")
     
     check_python()
     setup_venv()
     install_dependencies()
     check_ollama()
-    check_model()
+    selected_model = detect_and_select_model()
     verify_structure()
     
     port = find_free_port()
-    print_diagnostic_report(port)
+    print_diagnostic_report(port, selected_model)
     
     print("🚀 Starting FastAPI server...")
     global server_process
     
-    # ✅ FIXED: Use specific reload directories to prevent uploads from triggering reload
+    # Build uvicorn command with specific reload directories
     reload_dirs = [
         "api", "services", "utils", "config", 
         "templates", "static"
     ]
     
-    # Build uvicorn command with specific reload directories
     uvicorn_cmd = [
         str(VENV_PYTHON), "-m", "uvicorn", "app:app",
         "--host", "127.0.0.1", "--port", str(port)
     ]
     
     # Add reload flag and specific directories
-    if Path(".venv").exists():  # Only reload in dev mode
+    if Path(".venv").exists():
         uvicorn_cmd.append("--reload")
         for dir_name in reload_dirs:
             uvicorn_cmd.extend(["--reload-dir", dir_name])
     
     server_process = subprocess.Popen(uvicorn_cmd)
     
-    # Wait a moment for server to start
+    # Wait for server to start
     time.sleep(2)
     
-    print(f"🌐 Opening browser at http://127.0.0.1:{port}")
+    print(f"\n🌐 Opening application at http://127.0.0.1:{port}")
+    print("   (If browser doesn't open, manually visit the URL above)")
     webbrowser.open(f"http://127.0.0.1:{port}")
     
     print("\n✅ Setup complete! Press Ctrl+C to stop the server.")
     print("📁 Note: Server will NOT reload on file uploads (only on code changes)")
+    print()
     
     try:
         server_process.wait()
