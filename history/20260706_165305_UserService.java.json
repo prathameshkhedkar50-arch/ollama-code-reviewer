@@ -1,0 +1,34 @@
+{
+  "filename": "UserService.java",
+  "language": "Java",
+  "reviewed_at": "2026-07-06T16:53:05.987860",
+  "overall_score": 65,
+  "review": {
+    "overall_score": 65,
+    "summary": "This code defines a UserService class that interacts with a database to retrieve and print user names based on a given name.",
+    "conclusion": "The code has some issues with security and resource management, but it is relatively easy to read and understand. Refactoring is needed to improve its quality.",
+    "bugs": [
+      "SQL Injection vulnerability due to string concatenation in the query"
+    ],
+    "security": [
+      "SQL Injection"
+    ],
+    "performance": [
+      "SQL Injection vulnerability: The SQL query is constructed using string concatenation, which can lead to SQL injection attacks.",
+      "Memory Leak: Large ResultSet objects are not closed, leading to potential memory leaks."
+    ],
+    "readability": [
+      "The method names and variable names are clear, but the query string construction is not secure due to SQL injection risk."
+    ],
+    "architecture": [],
+    "best_practices": [],
+    "refactoring": [
+      "Use a PreparedStatement instead of Statement for preventing SQL injection.",
+      "Consider using a try-with-resources statement to ensure that all resources are closed properly."
+    ],
+    "documentation": [],
+    "positive_points": [
+      "Method names and variable names are clear."
+    ]
+  }
+}

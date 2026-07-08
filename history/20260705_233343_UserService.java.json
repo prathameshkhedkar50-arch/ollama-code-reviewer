@@ -1,0 +1,38 @@
+{
+  "filename": "UserService.java",
+  "language": "Java",
+  "reviewed_at": "2026-07-05T23:33:43.382076",
+  "overall_score": 50,
+  "review": {
+    "overall_score": 50,
+    "summary": "The code defines a UserService class that interacts with a database to retrieve and display user information based on a given name.",
+    "conclusion": "The code has some good practices but suffers from readability issues due to direct SQL queries and lacks documentation. A refactor would greatly improve its quality.",
+    "bugs": [
+      "{'issue': 'SQL Injection', 'description': 'The SQL query is constructed using string concatenation, which makes it vulnerable to SQL injection attacks.', 'line': 'String query = \"SELECT * FROM users WHERE name=\\''}"
+    ],
+    "security": [
+      "SQL Injection: The user input `name` is directly concatenated into the SQL query without any validation or parameterized queries, making it vulnerable to SQL injection attacks."
+    ],
+    "performance": [
+      "SQL Injection Vulnerability: The query string construction is vulnerable to SQL injection attacks.",
+      "Unnecessary String Concatenation: The concatenation of the SQL query with user input can lead to performance issues if the query becomes very large.",
+      "Blocking I/O Operations Inside Tight Loop: The while loop that processes the ResultSet executes blocking database operations, which can lead to performance bottlenecks if the result set is large."
+    ],
+    "readability": [
+      "The variable and function names are clear, but the SQL query directly embedded in the code reduces readability. Consider using prepared statements to avoid SQL injection risks."
+    ],
+    "architecture": [],
+    "best_practices": [
+      "The class is cohesive, but it would be better to separate database logic from business logic into different classes.",
+      "Using raw SQL queries can lead to vulnerabilities like SQL injection; consider using ORM frameworks or parameterized queries."
+    ],
+    "refactoring": [
+      "Refactor the SQL query to use a PreparedStatement for improved security and readability. Move database-related logic to a separate DAO class.",
+      "Extract the printUsers method into a utility class if it's not used elsewhere in the UserService class."
+    ],
+    "documentation": [],
+    "positive_points": [
+      "The variable and function names are descriptive, which is good for understanding the code initially."
+    ]
+  }
+}

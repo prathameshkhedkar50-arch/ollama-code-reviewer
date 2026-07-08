@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ app_name }} - v{{ version }}</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233B82F6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='16 18 22 12 16 6'></polyline><polyline points='8 6 2 12 8 18'></polyline></svg>">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+    <!-- Header Section -->
+    <header class="app-header">
+        <div class="container">
+            <div class="header-content">
+                <h1 class="app-title">{{ app_name }}</h1>
+                <span class="app-version-badge">v{{ version }}</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Section -->
+    <main class="app-main">
+        <div class="container">
+            
+            <!-- Welcome Section -->
+            <section class="welcome-section">
+                <h2>AI-Powered Code Analysis</h2>
+                <p class="description">
+                    Upload your source code for a comprehensive, offline AI review. 
+                    Get instant feedback on bugs, security, performance, and architecture.
+                </p>
+            </section>
+
+            <!-- Status Dashboard -->
+            <section class="status-dashboard">
+                <div class="status-card">
+                    <div class="status-header">
+                        <span class="status-icon">⚡</span>
+                        <h3>System Status</h3>
+                    </div>
+                    <p class="status-message">
+                        <span class="status-indicator"></span>
+                        <span>Application Initialized</span>
+                    </p>
+                </div>
+
+                <div class="status-card">
+                    <div class="status-header">
+                        <span class="status-icon">🧠</span>
+                        <h3>Ollama AI</h3>
+                    </div>
+                    <p class="status-message">
+                        <span id="ollama-status-indicator" class="status-indicator disconnected"></span>
+                        <span id="ollama-status-text">Checking connection...</span>
+                    </p>
+                    <div id="ollama-details" class="ollama-details hidden">
+                        <p><strong>Model:</strong> <span id="ollama-default-model">-</span></p>
+                        <p><strong>Available:</strong> <span id="ollama-models-list">-</span></p>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Upload & Analysis Section -->
+            <section class="upload-section">
+                <div class="upload-card">
+                    <div class="card-header">
+                        <h2>Upload Source Code</h2>
+                        <p class="upload-description">
+                            Drag and drop a file or browse. Supported: Python, Java, JS, TS, C, C++, C#, Go, Rust, PHP, Kotlin, Swift.
+                        </p>
+                    </div>
+
+                    <!-- Drop Zone -->
+                    <div id="drop-zone" class="drop-zone">
+                        <div class="drop-zone-content">
+                            <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="17 8 12 3 7 8"></polyline>
+                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                            </svg>
+                            <p class="drop-text">Drag & Drop your file here</p>
+                            <p class="drop-zone-subtext">or</p>
+                            <button type="button" id="browse-btn" class="btn btn-secondary">Browse Files</button>
+                            <input type="file" id="file-input" class="hidden" accept=".py,.java,.js,.ts,.cpp,.c,.cs,.go,.rs,.php,.kt,.swift,.txt">
+                        </div>
+                    </div>
+
+                    <!-- Selected File Info -->
+                    <div id="file-info" class="file-info hidden">
+                        <div class="file-details">
+                            <span class="file-icon">📄</span>
+                            <div class="file-text">
+                                <p id="file-name" class="file-name">filename.py</p>
+                                <p id="file-meta" class="file-meta">0 KB • .py</p>
+                            </div>
+                        </div>
+                        <button type="button" id="reset-btn" class="btn-icon" title="Remove file">✕</button>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div id="action-buttons" class="action-buttons hidden">
+                        <button type="button" id="analyze-btn" class="btn btn-primary">
+                            <span class="btn-text">Analyze Code</span>
+                        </button>
+                    </div>
+
+                    <!-- AI Thinking / Loading State -->
+                    <div id="ai-thinking-state" class="ai-thinking-state hidden">
+                        <div class="thinking-header">
+                            <div class="thinking-spinner">
+                                <svg viewBox="0 0 24 24" class="spinner-svg">
+                                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4" stroke-linecap="round"/>
+                                </svg>
+                            </div>
+                            <div class="thinking-text">
+                                <h3 id="thinking-title" class="thinking-title">Initializing AI Review...</h3>
+                                <p id="thinking-subtitle" class="thinking-subtitle">Preparing prompt...</p>
+                            </div>
+                        </div>
+                        <div class="thinking-timer">
+                            <span class="timer-label">Elapsed Time</span>
+                            <span id="thinking-timer-value" class="timer-value">00:00</span>
+                        </div>
+                    </div>
+
+                    <!-- Success State -->
+                    <div id="ai-success-state" class="ai-state-message success-state hidden">
+                        <div class="state-icon-wrapper success">
+                            <span>✓</span>
+                        </div>
+                        <div class="state-text">
+                            <h4>AI Review Complete</h4>
+                            <p>The analysis has been successfully generated.</p>
+                        </div>
+                    </div>
+
+                    <!-- Error State -->
+                    <div id="ai-error-state" class="ai-state-message error-state hidden">
+                        <div class="state-icon-wrapper error">
+                            <span>⚠</span>
+                        </div>
+                        <div class="state-text">
+                            <h4>Unable to complete AI review</h4>
+                            <p>Please verify Ollama is running and try again.</p>
+                        </div>
+                        <button type="button" id="retry-btn" class="btn btn-secondary">Retry Analysis</button>
+                    </div>
+
+                    <!-- Generic Status Message -->
+                    <div id="upload-status" class="upload-status hidden"></div>
+                </div>
+            </section>
+
+            <!-- Review Results Section -->
+            <section id="review-results" class="review-section hidden">
+                <div class="review-card">
+                    <!-- Review Header -->
+                    <div class="review-header">
+                        <div>
+                            <h2>Code Review Results</h2>
+                            <p class="review-file-info">
+                                <span id="review-filename">-</span> • <span id="review-language">-</span>
+                            </p>
+                        </div>
+                        <div class="review-score-badge">
+                            <span id="review-score" class="score-number">0</span>
+                            <span class="score-label">/ 100</span>
+                        </div>
+                    </div>
+
+                    <!-- Summary -->
+                    <div class="review-summary-section">
+                        <h3>Executive Summary</h3>
+                        <p id="review-summary-text">-</p>
+                    </div>
+
+                    <!-- Review Categories -->
+                    <div class="review-categories">
+                        <div class="review-category">
+                            <h4>🐛 Bugs & Logic</h4>
+                            <ul id="review-bugs" class="finding-list"></ul>
+                        </div>
+                        <div class="review-category">
+                            <h4>🔒 Security</h4>
+                            <ul id="review-security" class="finding-list"></ul>
+                        </div>
+                        <div class="review-category">
+                            <h4>⚡ Performance</h4>
+                            <ul id="review-performance" class="finding-list"></ul>
+                        </div>
+                        <div class="review-category">
+                            <h4>📖 Readability</h4>
+                            <ul id="review-readability" class="finding-list"></ul>
+                        </div>
+                        <div class="review-category">
+                            <h4>🏗️ Architecture</h4>
+                            <ul id="review-architecture" class="finding-list"></ul>
+                        </div>
+                        <div class="review-category">
+                            <h4>✅ Best Practices</h4>
+                            <ul id="review-best-practices" class="finding-list"></ul>
+                        </div>
+                        <div class="review-category">
+                            <h4>🔧 Refactoring</h4>
+                            <ul id="review-refactoring" class="finding-list"></ul>
+                        </div>
+                        <div class="review-category">
+                            <h4>📝 Documentation</h4>
+                            <ul id="review-documentation" class="finding-list"></ul>
+                        </div>
+                        <div class="review-category positive">
+                            <h4>👍 Positive Points</h4>
+                            <ul id="review-positive" class="finding-list"></ul>
+                        </div>
+                    </div>
+
+                    <!-- Conclusion -->
+                    <div class="review-conclusion">
+                        <h3>Conclusion</h3>
+                        <p id="review-conclusion-text">-</p>
+                    </div>
+
+                    <!-- Export Actions -->
+                    <div id="review-actions" class="review-actions hidden">
+                        <button type="button" id="download-review-btn" class="btn btn-primary">
+                            <span>⬇️</span> Download Current JSON
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <!-- Footer Section -->
+    <footer class="app-footer">
+        <div class="container">
+            <p>© 2026 {{ app_name }}. Running locally with Ollama.</p>
+        </div>
+    </footer>
+
+    <!-- Link to external JavaScript -->
+    <script src="/static/js/app.js" defer></script>
+</body>
+</html>
