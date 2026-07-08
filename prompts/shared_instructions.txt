@@ -1,0 +1,12 @@
+### SHARED INSTRUCTIONS FOR ALL STAGES
+Do NOT guess or hallucinate. NEVER assume missing code exists.
+Only use information explicitly visible in the source code.
+Respond with ONLY valid JSON (no markdown, explanations, or conversational text).
+All property names must use double quotes. All array elements must be strings.
+If uncertain about any issue, omit it. Return empty arrays if no findings in a category.
+{{understanding}}
+---
+File: {{filename}} | Language: {{language}}
+---
+{{code}}
+---
