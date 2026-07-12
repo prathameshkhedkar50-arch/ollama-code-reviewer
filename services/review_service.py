@@ -2,9 +2,9 @@ import asyncio
 import json
 import logging
 import time
-
-from fastapi import HTTPException, UploadFile
-
+import uuid
+from typing import Dict, Any, Optional
+from fastapi import UploadFile
 from services.file_service import process_uploaded_file
 from services.ollama_service import generate as ollama_generate
 from services.prompt_service import build_prompt
@@ -20,123 +20,113 @@ STAGE_PROMPTS = {
     "architecture": "stage5_architecture.txt"
 }
 
+class ReviewManager:
+    def __init__(self):
+        self.reviews: Dict[str, Dict[str, Any]] = {}
 
-def format_understanding(stage1_result: dict) -> str:
-    """Converts the Stage 1 JSON output into a readable string context for subsequent stages."""
-    if not stage1_result:
-        return "No understanding generated."
-    
-    lines = []
-    summary = stage1_result.get("summary")
-    if summary and isinstance(summary, str):
-        lines.append(f"Summary: {summary}")
-        
-    classes = stage1_result.get("classes")
-    if classes and isinstance(classes, list):
-        lines.append(f"Classes: {', '.join(str(c) for c in classes)}")
-        
-    methods = stage1_result.get("methods")
-    if methods and isinstance(methods, list):
-        lines.append(f"Methods: {', '.join(str(m) for m in methods)}")
-        
-    variables = stage1_result.get("important_variables")
-    if variables and isinstance(variables, list):
-        lines.append(f"Key Variables: {', '.join(str(v) for v in variables)}")
-        
-    control_flow = stage1_result.get("control_flow")
-    if control_flow and isinstance(control_flow, str):
-        lines.append(f"Control Flow: {control_flow}")
-        
-    complexity = stage1_result.get("complexity")
-    if complexity and isinstance(complexity, str):
-        lines.append(f"Complexity: {complexity}")
-        
-    return "\n".join(lines) if lines else "No understanding generated."
+    def create_review(self, file_data: dict) -> str:
+        """Initializes a new review and starts the background pipeline."""
+        review_id = str(uuid.uuid4())
+        self.reviews[review_id] = {
+            "review_id": review_id,
+            "status": "running",
+            "stage": 3,  # Start at Stage 1 (Index 3)
+            "result": None,
+            "error": None
+        }
+        # Start the pipeline in the background so the HTTP request doesn't block/timeout
+        asyncio.create_task(self._run_review_pipeline(review_id, file_data))
+        return review_id
 
+    def get_progress(self, review_id: str) -> Optional[Dict[str, Any]]:
+        """Returns the current progress object for a specific review."""
+        return self.reviews.get(review_id)
 
-async def run_stage(stage_name: str, filename: str, language: str, code: str, understanding: str = "") -> dict:
-    """Executes a single stage with retry logic and execution timing."""
-    template_name = STAGE_PROMPTS[stage_name]
-    prompt = build_prompt(filename, language, code, template_name, understanding)
-    
-    logger.info(f"Stage {stage_name} Started")
-    start_time = time.time()
-    
-    try:
-        raw_response = await ollama_generate(prompt)
-        json_str = extract_json_string(raw_response)
-        result = json.loads(json_str)
-        duration = time.time() - start_time
-        logger.info(f"Stage {stage_name} Completed ({duration:.2f}s)")
-        return result
-    except Exception as e:
-        duration = time.time() - start_time
-        logger.error(f"Stage {stage_name} failed after {duration:.2f}s: {e}. Retrying once...")
+    async def _run_stage(self, review_id: str, stage_name: str, stage_index: int, filename: str, language: str, code: str, understanding: str = "") -> dict:
+        """Executes a single stage with retry logic and progress updates."""
+        self.reviews[review_id]["stage"] = stage_index
+        template_name = STAGE_PROMPTS[stage_name]
+        prompt = build_prompt(filename, language, code, template_name, understanding)
+        
         try:
-            start_time_retry = time.time()
             raw_response = await ollama_generate(prompt)
             json_str = extract_json_string(raw_response)
-            result = json.loads(json_str)
-            duration = time.time() - start_time_retry
-            logger.info(f"Stage {stage_name} Completed after retry ({duration:.2f}s)")
-            return result
-        except Exception as retry_e:
-            duration = time.time() - start_time
-            logger.error(f"Stage {stage_name} failed after retry ({duration:.2f}s): {retry_e}")
-            return {}  # Return empty dict to allow partial merge
+            return json.loads(json_str)
+        except Exception as e:
+            logger.error(f"Stage {stage_name} failed: {e}. Retrying...")
+            try:
+                raw_response = await ollama_generate(prompt)
+                json_str = extract_json_string(raw_response)
+                return json.loads(json_str)
+            except Exception as retry_e:
+                logger.error(f"Stage {stage_name} failed after retry: {retry_e}")
+                return {}
 
+    async def _run_review_pipeline(self, review_id: str, file_data: dict):
+        """The main background pipeline for a single review."""
+        try:
+            filename = file_data["filename"]
+            language = file_data["language"]
+            code = file_data["content"]
 
-async def review_file(file: UploadFile) -> dict:
-    """Orchestrates the multi-stage AI code review process with parallel execution."""
-    logger.info(f"Starting multi-stage review pipeline for file: {file.filename}")
-    pipeline_start_time = time.time()
-    
-    # 1. Process file
-    file_data = await process_uploaded_file(file)
-    filename = file_data["filename"]
-    language = file_data["language"]
-    code = file_data["content"]
-    
-    # 2. Stage 1 (Sequential)
-    stage1_result = await run_stage("understanding", filename, language, code)
-    understanding_str = format_understanding(stage1_result)
-    
-    # 3. Stages 2-5 (Parallel)
-    logger.info("Launching Parallel Analysis for Stages 2-5...")
-    results = await asyncio.gather(
-        run_stage("bugs", filename, language, code, understanding_str),
-        run_stage("security", filename, language, code, understanding_str),
-        run_stage("performance", filename, language, code, understanding_str),
-        run_stage("architecture", filename, language, code, understanding_str)
-    )
-    
-    stage2, stage3, stage4, stage5 = results
-    
-    # 4. Merge results
-    logger.info("Merging Results...")
-    merged_review = {
-        "summary": stage1_result.get("summary", "No summary available."),
-        "overall_score": stage5.get("overall_score", 0),
-        "bugs": stage2.get("bugs", []),
-        "security": stage3.get("security", []),
-        "performance": stage4.get("performance", []),
-        "readability": stage5.get("readability", []),
-        "architecture": stage5.get("architecture", []),
-        "best_practices": stage5.get("best_practices", []),
-        "refactoring": stage5.get("refactoring", []),
-        "documentation": stage5.get("documentation", []),
-        "positive_points": stage5.get("positive_points", []),
-        "conclusion": stage5.get("conclusion", "No conclusion available.")
-    }
-    
-    cleaned_review = validate_and_clean(merged_review)
-    
-    total_duration = time.time() - pipeline_start_time
-    logger.info(f"Review Completed in {total_duration:.2f}s")
-    
-    return {
-        "success": True,
-        "filename": filename,
-        "language": language,
-        "review": cleaned_review
-    }
+            # Stage 1: Understanding
+            stage1_result = await self._run_stage(review_id, "understanding", 3, filename, language, code)
+            understanding_str = self._format_understanding(stage1_result)
+
+            # Stages 2-5: Parallel Analysis
+            self.reviews[review_id]["stage"] = 4
+            results = await asyncio.gather(
+                self._run_stage(review_id, "bugs", 4, filename, language, code, understanding_str),
+                self._run_stage(review_id, "security", 5, filename, language, code, understanding_str),
+                self._run_stage(review_id, "performance", 6, filename, language, code, understanding_str),
+                self._run_stage(review_id, "architecture", 7, filename, language, code, understanding_str)
+            )
+            stage2, stage3, stage4, stage5 = results
+
+            # Merge Results
+            self.reviews[review_id]["stage"] = 8
+            merged_review = {
+                "summary": stage1_result.get("summary", "No summary available."),
+                "overall_score": stage5.get("overall_score", 0),
+                "bugs": stage2.get("bugs", []),
+                "security": stage3.get("security", []),
+                "performance": stage4.get("performance", []),
+                "readability": stage5.get("readability", []),
+                "architecture": stage5.get("architecture", []),
+                "best_practices": stage5.get("best_practices", []),
+                "refactoring": stage5.get("refactoring", []),
+                "documentation": stage5.get("documentation", []),
+                "positive_points": stage5.get("positive_points", []),
+                "conclusion": stage5.get("conclusion", "No conclusion available.")
+            }
+            cleaned_review = validate_and_clean(merged_review)
+
+            # Finalize
+            self.reviews[review_id]["stage"] = 9
+            self.reviews[review_id]["status"] = "completed"
+            self.reviews[review_id]["result"] = {
+                "success": True,
+                "filename": filename,
+                "language": language,
+                "review": cleaned_review
+            }
+            logger.info(f"Review {review_id} completed successfully.")
+
+        except Exception as e:
+            logger.error(f"Review {review_id} pipeline failed: {e}")
+            self.reviews[review_id]["status"] = "failed"
+            self.reviews[review_id]["error"] = str(e)
+
+    def _format_understanding(self, stage1_result: dict) -> str:
+        if not stage1_result: return "No understanding generated."
+        lines = []
+        if stage1_result.get("summary"): lines.append(f"Summary: {stage1_result['summary']}")
+        if stage1_result.get("classes"): lines.append(f"Classes: {', '.join(stage1_result['classes'])}")
+        if stage1_result.get("methods"): lines.append(f"Methods: {', '.join(stage1_result['methods'])}")
+        if stage1_result.get("important_variables"): lines.append(f"Key Variables: {', '.join(stage1_result['important_variables'])}")
+        if stage1_result.get("control_flow"): lines.append(f"Control Flow: {stage1_result['control_flow']}")
+        if stage1_result.get("complexity"): lines.append(f"Complexity: {stage1_result['complexity']}")
+        return "\n".join(lines) if lines else "No understanding generated."
+
+# Global instance that api/review.py imports
+review_manager = ReviewManager()

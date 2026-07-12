@@ -105,30 +105,29 @@
                         </button>
                     </div>
 
-                    <!-- AI Thinking / Loading State -->
-                    <div id="ai-thinking-state" class="ai-thinking-state hidden">
-                        <div class="thinking-header">
-                            <div class="thinking-spinner">
-                                <svg viewBox="0 0 24 24" class="spinner-svg">
-                                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4" stroke-linecap="round"/>
-                                </svg>
-                            </div>
-                            <div class="thinking-text">
-                                <h3 id="thinking-title" class="thinking-title">Initializing AI Review...</h3>
-                                <p id="thinking-subtitle" class="thinking-subtitle">Preparing prompt...</p>
+                    <!-- Multi-Stage Progress UI -->
+                    <div id="review-progress" class="review-progress hidden">
+                        <div class="progress-header">
+                            <h3>AI Review in Progress</h3>
+                            <div class="progress-stats">
+                                <div class="elapsed-time">
+                                    <span class="timer-label">Elapsed Time</span>
+                                    <span id="progress-timer" class="timer-value">00:00</span>
+                                </div>
+                                <div class="stage-counter">
+                                    <span id="stage-current">0</span> / <span id="stage-total">10</span> Stages
+                                </div>
                             </div>
                         </div>
-                        <div class="thinking-timer">
-                            <span class="timer-label">Elapsed Time</span>
-                            <span id="thinking-timer-value" class="timer-value">00:00</span>
+                        <div class="progress-bar-container">
+                            <div id="progress-bar" class="progress-bar"></div>
                         </div>
+                        <div id="stages-list" class="stages-list"></div>
                     </div>
 
                     <!-- Success State -->
                     <div id="ai-success-state" class="ai-state-message success-state hidden">
-                        <div class="state-icon-wrapper success">
-                            <span>✓</span>
-                        </div>
+                        <div class="state-icon-wrapper success"><span>✓</span></div>
                         <div class="state-text">
                             <h4>AI Review Complete</h4>
                             <p>The analysis has been successfully generated.</p>
@@ -137,12 +136,10 @@
 
                     <!-- Error State -->
                     <div id="ai-error-state" class="ai-state-message error-state hidden">
-                        <div class="state-icon-wrapper error">
-                            <span>⚠</span>
-                        </div>
+                        <div class="state-icon-wrapper error"><span>⚠</span></div>
                         <div class="state-text">
                             <h4>Unable to complete AI review</h4>
-                            <p>Please verify Ollama is running and try again.</p>
+                            <p id="error-message">Please verify Ollama is running and try again.</p>
                         </div>
                         <button type="button" id="retry-btn" class="btn btn-secondary">Retry Analysis</button>
                     </div>
@@ -152,81 +149,184 @@
                 </div>
             </section>
 
-            <!-- Review Results Section -->
-            <section id="review-results" class="review-section hidden">
-                <div class="review-card">
-                    <!-- Review Header -->
-                    <div class="review-header">
-                        <div>
-                            <h2>Code Review Results</h2>
-                            <p class="review-file-info">
-                                <span id="review-filename">-</span> • <span id="review-language">-</span>
-                            </p>
+            <!-- ========================================== -->
+            <!-- NEW COMPACT PROFESSIONAL REPORT SECTION    -->
+            <!-- ========================================== -->
+            <section id="review-results" class="review-report-section hidden">
+                <div class="report-container">
+                    
+                    <!-- 1. Compact Header -->
+                    <div class="report-header">
+                        <div class="header-meta">
+                            <h2 class="report-title">✅ Review Completed Successfully</h2>
+                            <div class="meta-tags">
+                                <span class="tag"><strong>File:</strong> <span id="report-filename">-</span></span>
+                                <span class="tag"><strong>Lang:</strong> <span id="report-language">-</span></span>
+                                <span class="tag"><strong>Duration:</strong> <span id="report-duration">-</span></span>
+                            </div>
                         </div>
-                        <div class="review-score-badge">
-                            <span id="review-score" class="score-number">0</span>
-                            <span class="score-label">/ 100</span>
+                        <div class="header-actions">
+                            <button id="download-json-btn" class="btn btn-sm"> JSON</button>
                         </div>
                     </div>
 
-                    <!-- Summary -->
-                    <div class="review-summary-section">
+                    <!-- 2. Large Overall Score Card -->
+                    <div class="score-section">
+                        <div class="score-card" id="score-card">
+                            <div class="score-value" id="report-score">0</div>
+                            <div class="score-label">Overall Quality</div>
+                            <div class="score-status" id="score-rating">Calculating...</div>
+                        </div>
+                    </div>
+
+                    <!-- 3. Executive Summary -->
+                    <div class="summary-section">
                         <h3>Executive Summary</h3>
-                        <p id="review-summary-text">-</p>
+                        <p id="report-summary-text">-</p>
                     </div>
 
-                    <!-- Review Categories -->
-                    <div class="review-categories">
-                        <div class="review-category">
-                            <h4>🐛 Bugs & Logic</h4>
-                            <ul id="review-bugs" class="finding-list"></ul>
-                        </div>
-                        <div class="review-category">
-                            <h4>🔒 Security</h4>
-                            <ul id="review-security" class="finding-list"></ul>
-                        </div>
-                        <div class="review-category">
-                            <h4>⚡ Performance</h4>
-                            <ul id="review-performance" class="finding-list"></ul>
-                        </div>
-                        <div class="review-category">
-                            <h4>📖 Readability</h4>
-                            <ul id="review-readability" class="finding-list"></ul>
-                        </div>
-                        <div class="review-category">
-                            <h4>🏗️ Architecture</h4>
-                            <ul id="review-architecture" class="finding-list"></ul>
-                        </div>
-                        <div class="review-category">
-                            <h4>✅ Best Practices</h4>
-                            <ul id="review-best-practices" class="finding-list"></ul>
-                        </div>
-                        <div class="review-category">
-                            <h4>🔧 Refactoring</h4>
-                            <ul id="review-refactoring" class="finding-list"></ul>
-                        </div>
-                        <div class="review-category">
-                            <h4>📝 Documentation</h4>
-                            <ul id="review-documentation" class="finding-list"></ul>
-                        </div>
-                        <div class="review-category positive">
-                            <h4>👍 Positive Points</h4>
-                            <ul id="review-positive" class="finding-list"></ul>
+                    <!-- 4. Issue Statistics -->
+                    <div class="stats-section">
+                        <h3>Issue Statistics</h3>
+                        <div class="stats-grid" id="stats-grid">
+                            <!-- Populated by JS -->
                         </div>
                     </div>
 
-                    <!-- Conclusion -->
-                    <div class="review-conclusion">
-                        <h3>Conclusion</h3>
-                        <p id="review-conclusion-text">-</p>
+                    <!-- 5. Collapsible Categories (Accordions) -->
+                    <div class="categories-section">
+                        <h3>Detailed Findings</h3>
+                        <div class="accordion-group">
+                            
+                            <!-- Bugs -->
+                            <div class="accordion-item">
+                                <button class="accordion-header" data-target="acc-bugs">
+                                    <span class="acc-icon">🐛</span>
+                                    <span class="acc-title">Bugs & Logic</span>
+                                    <span class="acc-count" id="count-bugs">0</span>
+                                    <span class="acc-arrow">▼</span>
+                                </button>
+                                <div class="accordion-content hidden" id="acc-bugs">
+                                    <div class="findings-list" id="report-bugs"></div>
+                                </div>
+                            </div>
+
+                            <!-- Security -->
+                            <div class="accordion-item">
+                                <button class="accordion-header" data-target="acc-security">
+                                    <span class="acc-icon">🔒</span>
+                                    <span class="acc-title">Security</span>
+                                    <span class="acc-count" id="count-security">0</span>
+                                    <span class="acc-arrow">▼</span>
+                                </button>
+                                <div class="accordion-content hidden" id="acc-security">
+                                    <div class="findings-list" id="report-security"></div>
+                                </div>
+                            </div>
+
+                            <!-- Performance -->
+                            <div class="accordion-item">
+                                <button class="accordion-header" data-target="acc-performance">
+                                    <span class="acc-icon">⚡</span>
+                                    <span class="acc-title">Performance</span>
+                                    <span class="acc-count" id="count-performance">0</span>
+                                    <span class="acc-arrow">▼</span>
+                                </button>
+                                <div class="accordion-content hidden" id="acc-performance">
+                                    <div class="findings-list" id="report-performance"></div>
+                                </div>
+                            </div>
+
+                            <!-- Architecture -->
+                            <div class="accordion-item">
+                                <button class="accordion-header" data-target="acc-architecture">
+                                    <span class="acc-icon">🏗️</span>
+                                    <span class="acc-title">Architecture</span>
+                                    <span class="acc-count" id="count-architecture">0</span>
+                                    <span class="acc-arrow">▼</span>
+                                </button>
+                                <div class="accordion-content hidden" id="acc-architecture">
+                                    <div class="findings-list" id="report-architecture"></div>
+                                </div>
+                            </div>
+
+                            <!-- Readability -->
+                            <div class="accordion-item">
+                                <button class="accordion-header" data-target="acc-readability">
+                                    <span class="acc-icon">📖</span>
+                                    <span class="acc-title">Readability</span>
+                                    <span class="acc-count" id="count-readability">0</span>
+                                    <span class="acc-arrow">▼</span>
+                                </button>
+                                <div class="accordion-content hidden" id="acc-readability">
+                                    <div class="findings-list" id="report-readability"></div>
+                                </div>
+                            </div>
+
+                            <!-- Best Practices -->
+                            <div class="accordion-item">
+                                <button class="accordion-header" data-target="acc-best-practices">
+                                    <span class="acc-icon">✅</span>
+                                    <span class="acc-title">Best Practices</span>
+                                    <span class="acc-count" id="count-best-practices">0</span>
+                                    <span class="acc-arrow">▼</span>
+                                </button>
+                                <div class="accordion-content hidden" id="acc-best-practices">
+                                    <div class="findings-list" id="report-best-practices"></div>
+                                </div>
+                            </div>
+
+                            <!-- Refactoring -->
+                            <div class="accordion-item">
+                                <button class="accordion-header" data-target="acc-refactoring">
+                                    <span class="acc-icon">🔧</span>
+                                    <span class="acc-title">Refactoring</span>
+                                    <span class="acc-count" id="count-refactoring">0</span>
+                                    <span class="acc-arrow">▼</span>
+                                </button>
+                                <div class="accordion-content hidden" id="acc-refactoring">
+                                    <div class="findings-list" id="report-refactoring"></div>
+                                </div>
+                            </div>
+
+                            <!-- Documentation -->
+                            <div class="accordion-item">
+                                <button class="accordion-header" data-target="acc-documentation">
+                                    <span class="acc-icon">📝</span>
+                                    <span class="acc-title">Documentation</span>
+                                    <span class="acc-count" id="count-documentation">0</span>
+                                    <span class="acc-arrow">▼</span>
+                                </button>
+                                <div class="accordion-content hidden" id="acc-documentation">
+                                    <div class="findings-list" id="report-documentation"></div>
+                                </div>
+                            </div>
+
+                            <!-- Positive Points -->
+                            <div class="accordion-item positive-item">
+                                <button class="accordion-header" data-target="acc-positive">
+                                    <span class="acc-icon"></span>
+                                    <span class="acc-title">Positive Points</span>
+                                    <span class="acc-count" id="count-positive">0</span>
+                                    <span class="acc-arrow">▼</span>
+                                </button>
+                                <div class="accordion-content hidden" id="acc-positive">
+                                    <div class="findings-list" id="report-positive"></div>
+                                </div>
+                            </div>
+
+                        </div>
                     </div>
 
-                    <!-- Export Actions -->
-                    <div id="review-actions" class="review-actions hidden">
-                        <button type="button" id="download-review-btn" class="btn btn-primary">
-                            <span>⬇️</span> Download Current JSON
-                        </button>
+                    <!-- 6. Final Recommendation -->
+                    <div class="recommendation-section">
+                        <h3>Final Recommendation</h3>
+                        <div class="rec-card">
+                            <div class="rec-title" id="report-recommendation">-</div>
+                            <p class="rec-desc" id="report-conclusion-text">-</p>
+                        </div>
                     </div>
+
                 </div>
             </section>
 

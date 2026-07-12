@@ -1,26 +1,26 @@
 from typing import Any
-
-from fastapi import APIRouter, File, UploadFile
-
-from services.review_service import review_file
+from fastapi import APIRouter, File, UploadFile, HTTPException
+from services.file_service import process_uploaded_file
+from services.review_service import review_manager
 
 router = APIRouter()
 
-
 @router.post("/review")
-async def review_code(file: UploadFile = File(...)) -> dict[str, Any]:
+async def start_review(file: UploadFile = File(...)) -> dict[str, Any]:
     """
-    Endpoint to trigger the complete AI code review pipeline.
-    
-    This route receives the uploaded file and delegates the entire workflow 
-    (file processing, prompt building, Ollama generation, and JSON parsing) 
-    to the review service layer.
-    
-    Args:
-        file: The uploaded source code file provided in the multipart/form-data request.
-        
-    Returns:
-        dict: A JSON object containing the success status, file metadata, 
-              and the structured AI review.
+    Starts a review in the background and returns a review_id immediately.
+    This prevents HTTP timeouts during long-running AI analysis.
     """
-    return await review_file(file)
+    file_data = await process_uploaded_file(file)
+    review_id = review_manager.create_review(file_data)
+    return {"review_id": review_id, "status": "started"}
+
+@router.get("/review/progress/{review_id}")
+async def get_review_progress(review_id: str) -> dict[str, Any]:
+    """
+    Returns the real-time progress object for a specific review.
+    """
+    progress = review_manager.get_progress(review_id)
+    if not progress:
+        raise HTTPException(status_code=404, detail="Review not found")
+    return progress

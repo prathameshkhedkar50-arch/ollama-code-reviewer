@@ -28,15 +28,15 @@ class Settings(BaseSettings):
     UPLOAD_DIR: Path = Path("uploads")
     HISTORY_DIR: Path = Path("history")
 
-    # --- Ollama Configuration ---
-    OLLAMA_URL: str = "http://localhost:11434"
+   # --- Ollama Configuration ---
+    OLLAMA_URL: str = "http://127.0.0.1:11434"
     DEFAULT_MODEL: str = "qwen2.5-coder:7b"
     
     # --- Timeout Configuration (in seconds) ---
     # Adaptive timeout: base timeout + (model_size * multiplier)
     # Small models (3B): ~30s, Medium (7B): ~60s, Large (13B+): ~120s
-    OLLAMA_BASE_TIMEOUT: int = 30
-    OLLAMA_TIMEOUT_MULTIPLIER: float = 10.0  # Extra time per GB of model size
+    OLLAMA_BASE_TIMEOUT: int = 120
+    OLLAMA_TIMEOUT_MULTIPLIER: float = 15.0  # Extra time per GB of model size
     
     # --- Ollama Generation Parameters ---
     # These are passed to Ollama's /api/generate endpoint

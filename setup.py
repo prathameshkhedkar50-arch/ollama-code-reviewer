@@ -11,6 +11,7 @@ import shutil
 import signal
 import subprocess
 import webbrowser
+import re
 from pathlib import Path
 
 # Try to import hardware detection libraries
@@ -105,6 +106,52 @@ def signal_handler(sig, frame):
     cleanup_temp_files()
     sys.exit(0)
 
+def get_configured_model():
+    """Read DEFAULT_MODEL from config/settings.py."""
+    config_file = Path("config/settings.py")
+    if not config_file.exists():
+        return None
+    try:
+        content = config_file.read_text()
+        match = re.search(r'DEFAULT_MODEL:\s*str\s*=\s*["\']([^"\']+)["\']', content)
+        if match:
+            return match.group(1).strip()
+    except Exception as e:
+        print(f"⚠️  Error reading config: {e}")
+    return None
+
+def verify_and_pull_model(model_name):
+    """Verify model exists, pull if missing, and test it."""
+    print_section(f"📥 Checking Model: {model_name}")
+    success, output = run_cmd(["ollama", "list"], capture=True)
+    if success and model_name in output:
+        print(f"✅ Model {model_name} is already installed.")
+    else:
+        print(f"⚙️  Model {model_name} not found. Downloading...")
+        print("   (This may take several minutes depending on your internet speed)")
+        success, msg = run_cmd(["ollama", "pull", model_name])
+        if success:
+            print(f"✅ Model {model_name} downloaded successfully.")
+        else:
+            print(f"⚠️  Failed to pull model automatically.")
+            print(f"   Error: {msg}")
+            print(f"   Please run manually: ollama pull {model_name}")
+
+    # Test model generation
+    print_section("🧪 Testing Model")
+    print(f"  Running quick test with {model_name}...")
+    test_prompt = "Say 'OK'"
+    test_payload = f'{{"model": "{model_name}", "prompt": "{test_prompt}", "stream": false}}'
+    success, msg = run_cmd(
+        ["curl", "-s", "http://localhost:11434/api/generate", "-d", test_payload],
+        capture=True
+    )
+    if success and "error" not in msg.lower():
+        print(f"✅ Model {model_name} is working correctly.")
+    else:
+        print(f"⚠️  Model test failed. The model may not be fully ready.")
+        print(f"   It will be retried during first use.")
+
 # ==========================================
 # HARDWARE DETECTION
 # ==========================================
@@ -115,18 +162,14 @@ def get_system_resources():
     Returns: (cpu_count, ram_gb, vram_gb, has_gpu)
     """
     cpu_count = os.cpu_count() or 1
-    
     if psutil is None:
         print("⚠️  psutil not found. Cannot detect RAM. Assuming 4GB.")
         return cpu_count, 4, 0, False
-    
     try:
         # Get RAM
         ram_bytes = psutil.virtual_memory().total
         ram_gb = ram_bytes / (1024**3)
-        
         # Try to detect GPU (simplified - just check if cuda/mps available)
-        # For more accuracy, would need nvidia-ml-py or similar
         try:
             import torch
             vram_gb = 0
@@ -136,7 +179,6 @@ def get_system_resources():
         except ImportError:
             has_gpu = False
             vram_gb = 0
-        
         return cpu_count, ram_gb, vram_gb, has_gpu
     except Exception as e:
         print(f"⚠️  Error detecting system resources: {e}. Assuming 4GB RAM.")
@@ -149,25 +191,20 @@ def select_best_model(ram_gb, vram_gb):
     """
     available_vram = vram_gb if vram_gb > 0 else 0
     available_ram = ram_gb
-    
     # Prefer VRAM over RAM for Ollama
     available_memory = max(available_vram, available_ram)
-    
     selected_model = None
     reason = ""
-    
     # Find the best model that fits
     for model_name, min_ram, min_vram, description in reversed(MODEL_TIERS):
         if available_vram >= min_vram or (min_vram == 0 and available_ram >= min_ram):
             selected_model = model_name
             reason = description
             break
-    
     # Fallback to smallest model if nothing matches
     if selected_model is None:
         selected_model, _, _, reason = MODEL_TIERS[0]
         reason = f"{reason} (minimum fallback)"
-    
     return selected_model, reason
 
 # ==========================================
@@ -192,19 +229,16 @@ def setup_venv():
     print(f"✅ Virtual environment ready at {VENV_DIR}")
 
 def install_dependencies():
-    print("📥 Checking dependencies...")
+    print(" Checking dependencies...")
     req_file = Path("requirements.txt")
     if not req_file.exists():
         print("❌ requirements.txt not found!")
         sys.exit(1)
-    
     # Upgrade pip first
     run_cmd(PIP_CMD + ["install", "--upgrade", "pip"], capture=True)
-    
     # Try to install psutil for hardware detection
-    print("️  Installing packages (including hardware detection tools)...")
+    print("⚙️  Installing packages (including hardware detection tools)...")
     run_cmd(PIP_CMD + ["install", "psutil"], capture=True)
-    
     # Install requirements
     success, msg = run_cmd(PIP_CMD + ["install", "-r", "requirements.txt"])
     if not success:
@@ -219,13 +253,11 @@ def check_ollama():
         print("👉 Download from: https://ollama.com")
         print("   After installation, please run this script again.")
         sys.exit(1)
-    
     # Check if server is running
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         result = sock.connect_ex(('127.0.0.1', 11434))
         sock.close()
-        
         if result == 0:
             print("✅ Ollama server is already running.")
         else:
@@ -238,7 +270,6 @@ def check_ollama():
             )
             print("   Waiting for Ollama to start...")
             time.sleep(3)
-            
             # Verify it started
             result = sock.connect_ex(('127.0.0.1', 11434))
             if result == 0:
@@ -255,34 +286,28 @@ def detect_and_select_model():
     Update config with the selected model.
     """
     print_section("🧠 Detecting System Resources")
-    
     cpu_count, ram_gb, vram_gb, has_gpu = get_system_resources()
-    
     print(f"  CPU Cores      : {cpu_count}")
     print(f"  RAM            : {ram_gb:.1f} GB")
     print(f"  GPU Available  : {'Yes' if has_gpu else 'No'}")
     if has_gpu:
         print(f"  VRAM           : {vram_gb:.1f} GB")
-    
+        
     print_section("📋 Available Models")
-    
     for model_name, min_ram, min_vram, description in MODEL_TIERS:
         fits = False
         reason = ""
-        
         if min_vram > 0 and vram_gb >= min_vram:
             fits = True
             reason = "(fits VRAM)"
         elif min_vram == 0 and ram_gb >= min_ram:
             fits = True
             reason = "(fits RAM)"
-        
         status = "✅" if fits else "❌"
         print(f"  {status} {model_name:25} - {description} {reason}")
-    
+        
     # Select best model
     selected_model, reason = select_best_model(ram_gb, vram_gb)
-    
     print_section("🎯 Model Selection")
     print(f"  Recommended Model: {selected_model}")
     print(f"  Reason           : {reason}")
@@ -290,15 +315,12 @@ def detect_and_select_model():
     # Check if model is installed
     print_section("📥 Checking Model Installation")
     print(f"  Checking if {selected_model} is installed...")
-    
     success, output = run_cmd(["ollama", "list"], capture=True)
-    
     if success and selected_model in output:
         print(f"✅ Model {selected_model} is already installed.")
     else:
         print(f"⚙️  Model {selected_model} not found. Downloading...")
         print("   (This may take several minutes depending on your internet speed)")
-        
         success, msg = run_cmd(["ollama", "pull", selected_model])
         if success:
             print(f"✅ Model {selected_model} downloaded successfully.")
@@ -306,60 +328,51 @@ def detect_and_select_model():
             print(f"⚠️  Failed to pull model automatically.")
             print(f"   Error: {msg}")
             print(f"   Please run manually: ollama pull {selected_model}")
-            # Continue anyway - user might pull it later
-    
+            
     # Test model generation
-    print_section("🧪 Testing Model")
+    print_section(" Testing Model")
     print(f"  Running quick test with {selected_model}...")
-    
     test_prompt = "Say 'OK'"
     test_payload = f'{{"model": "{selected_model}", "prompt": "{test_prompt}", "stream": false}}'
     success, msg = run_cmd(
         ["curl", "-s", "http://localhost:11434/api/generate", "-d", test_payload],
         capture=True
     )
-    
     if success and "error" not in msg.lower():
         print(f"✅ Model {selected_model} is working correctly.")
     else:
         print(f"⚠️  Model test failed. The model may not be fully ready.")
         print(f"   It will be retried during first use.")
-    
+        
     # Update config file with selected model
     print_section("⚙️  Updating Configuration")
     config_file = Path("config/settings.py")
-    
     if config_file.exists():
         config_content = config_file.read_text()
         # Replace the DEFAULT_MODEL line
-        import re
         new_content = re.sub(
-            r'DEFAULT_MODEL: str = "[^"]*"',
+            r'DEFAULT_MODEL:\s*str\s*=\s*["\'][^"\']*["\']',
             f'DEFAULT_MODEL: str = "{selected_model}"',
             config_content
         )
         config_file.write_text(new_content)
         print(f"✅ Updated DEFAULT_MODEL to: {selected_model}")
-    
+        
     return selected_model
 
 def verify_structure():
     print("📁 Verifying project structure...")
     missing = []
-    
     for d in REQUIRED_DIRS:
         if not Path(d).exists():
             Path(d).mkdir(parents=True, exist_ok=True)
             print(f"   Created missing directory: {d}")
-            
     for p in REQUIRED_PROMPTS:
         if not Path(f"prompts/{p}").exists():
             missing.append(p)
-            
     if missing:
         print(f"❌ Missing prompt files: {', '.join(missing)}")
         sys.exit(1)
-        
     print("✅ Project structure verified.")
 
 def print_diagnostic_report(port, selected_model):
@@ -385,39 +398,49 @@ def print_diagnostic_report(port, selected_model):
 def main():
     # Register cleanup handler
     signal.signal(signal.SIGINT, signal_handler)
-    
+
     print_header("AI CODE REVIEWER - ENHANCED SETUP")
-    
+
     check_python()
     setup_venv()
     install_dependencies()
-    check_ollama()
-    selected_model = detect_and_select_model()
+    check_ollama()  # Verifies Ollama install and starts server
+
+    # Check if model is already configured in settings.py
+    configured_model = get_configured_model()
+
+    if configured_model:
+        print_section("⚙️  Configuration Detected")
+        print(f"  DEFAULT_MODEL is already set to: {configured_model}")
+        print("  Skipping hardware detection and model recommendation.")
+        verify_and_pull_model(configured_model)
+        selected_model = configured_model
+    else:
+        print_section("⚙️  No Model Configured")
+        print("  DEFAULT_MODEL is missing. Running hardware detection...")
+        selected_model = detect_and_select_model()
+
     verify_structure()
-    
     port = find_free_port()
     print_diagnostic_report(port, selected_model)
-    
+
     print("🚀 Starting FastAPI server...")
     global server_process
-    
     # Build uvicorn command with specific reload directories
     reload_dirs = [
         "api", "services", "utils", "config", 
         "templates", "static"
     ]
-    
     uvicorn_cmd = [
         str(VENV_PYTHON), "-m", "uvicorn", "app:app",
         "--host", "127.0.0.1", "--port", str(port)
     ]
-    
     # Add reload flag and specific directories
     if Path(".venv").exists():
         uvicorn_cmd.append("--reload")
         for dir_name in reload_dirs:
             uvicorn_cmd.extend(["--reload-dir", dir_name])
-    
+            
     server_process = subprocess.Popen(uvicorn_cmd)
     
     # Wait for server to start
@@ -435,6 +458,6 @@ def main():
         server_process.wait()
     except KeyboardInterrupt:
         signal_handler(None, None)
-        
+
 if __name__ == "__main__":
     main()

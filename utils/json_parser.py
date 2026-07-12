@@ -147,14 +147,15 @@ def repair_json(json_str: str) -> str:
 
 def validate_and_clean(data: dict) -> dict:
     """Validates the parsed dictionary against the expected schema and fixes types."""
-    cleaned_data = {}
+    logger.info(f"Input to validate_and_clean: {json.dumps(data, indent=2)}")
     
+    cleaned_data = {}
     missing_keys = REQUIRED_KEYS - set(data.keys())
     if missing_keys:
         logger.warning(f"AI response is missing keys: {missing_keys}. Applying defaults.")
         for key in missing_keys:
             data[key] = DEFAULTS[key]
-            
+    
     try:
         score = int(data.get("overall_score", 0))
         cleaned_data["overall_score"] = max(0, min(100, score))
@@ -164,7 +165,7 @@ def validate_and_clean(data: dict) -> dict:
     for key in ["summary", "conclusion"]:
         val = data.get(key)
         cleaned_data[key] = str(val) if isinstance(val, str) else DEFAULTS[key]
-            
+        
     list_keys = [
         "bugs", "security", "performance", "readability", 
         "architecture", "best_practices", "refactoring", 
@@ -174,13 +175,18 @@ def validate_and_clean(data: dict) -> dict:
     for key in list_keys:
         val = data.get(key)
         if isinstance(val, list):
-            cleaned_data[key] = [str(item) for item in val if item is not None]
+            # Filter out non-string items and empty strings
+            cleaned_list = [str(item).strip() for item in val if isinstance(item, (str, int, float)) and str(item).strip()]
+            cleaned_data[key] = cleaned_list
+        elif isinstance(val, str) and val.strip():
+            # CRITICAL FIX: AI returned a single string instead of a list. 
+            # Wrap it in a list to prevent data loss!
+            cleaned_data[key] = [val.strip()]
         else:
             cleaned_data[key] = []
             
-    logger.info("Schema validation and cleaning completed successfully.")
+    logger.info(f"Output from validate_and_clean: {json.dumps(cleaned_data, indent=2)}")
     return cleaned_data
-
 
 def parse_review(raw_response: str) -> dict:
     """Main entry point for processing the AI response with robust error handling."""
